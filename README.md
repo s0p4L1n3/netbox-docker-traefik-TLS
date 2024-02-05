@@ -1,6 +1,9 @@
 # netbox-docker-traefik-TLS
 Netbox docker with Traefik and Self Signed Cert
 
+Netbox version 3.7.2-2.8.0
+Traefik vesion 2.11
+
 1. Download this project
 2. Generate your own netbox TLS/private key pair.
 3. Copy paste content on secret/
