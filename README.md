@@ -5,7 +5,7 @@ Netbox docker with Traefik and Self Signed Cert
 - Traefik vesion 2.11
 
 1. Download this project
-2. Generate your own netbox TLS/private key pair.
+2. Generate your own netbox TLS cert/private key pair.
 3. Copy paste content on secret/
 4. Rename the netbox.lab.lan-crt.pem & netbox.lab.lan-key.pem according to your netbox fqdn.
 5. Edit docker-compose.yml & traefik/config.yml according to the rename.
