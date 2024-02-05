@@ -1,0 +1,158 @@
+version: '3'
+
+networks:
+  netbox:
+    driver: bridge
+
+secrets:
+  traefik.certificate:
+    file: ./secrets/netbox.lab.lan-crt.pem
+  traefik.key:
+    file: ./secrets/netbox.lab.lan-key.pem
+
+services:
+  netbox: &netbox
+    image: docker.io/netboxcommunity/netbox:${VERSION-v3.7-2.8.0}
+    depends_on:
+    - postgres
+    - redis
+    - redis-cache
+    env_file: env/netbox.env
+    user: 'unit:root'
+    healthcheck:
+      start_period: 60s
+      timeout: 3s
+      interval: 15s
+      test: "curl -f http://localhost:8080/api/ || exit 1"
+    volumes:
+    - ./configuration:/etc/netbox/config:z,ro
+    - netbox-media-files:/opt/netbox/netbox/media:rw
+    - netbox-reports-files:/opt/netbox/netbox/reports:rw
+    - netbox-scripts-files:/opt/netbox/netbox/scripts:rw
+    networks:
+      - netbox
+    labels:
+    # permet a traefik d'avoir des instructions pour ce service
+      - "traefik.enable=true"
+      - "traefik.http.routers.netbox.rule=Host(`netbox.lab.lan`)"
+      - "traefik.http.routers.netbox.service=netbox"
+      - "traefik.http.routers.netbox.entrypoints=https"
+      - "traefik.http.services.netbox.loadbalancer.server.port=8080"
+      - "traefik.docker.network=netbox"
+
+
+  netbox-worker:
+    <<: *netbox
+    depends_on:
+      netbox:
+        condition: service_healthy
+    command:
+    - /opt/netbox/venv/bin/python
+    - /opt/netbox/netbox/manage.py
+    - rqworker
+    labels:
+        - traefik.enable=false
+    healthcheck:
+      start_period: 20s
+      timeout: 3s
+      interval: 15s
+      test: "ps -aux | grep -v grep | grep -q rqworker || exit 1"
+    networks:
+      - netbox
+  
+  netbox-housekeeping:
+    <<: *netbox
+    depends_on:
+      netbox:
+        condition: service_healthy
+    command:
+    - /opt/netbox/housekeeping.sh
+    labels:
+        - traefik.enable=false
+    healthcheck:
+      start_period: 20s
+      timeout: 3s
+      interval: 15s
+      test: "ps -aux | grep -v grep | grep -q housekeeping || exit 1"
+    networks:
+      - netbox
+
+  # postgres
+  postgres:
+    image: docker.io/postgres:16-alpine
+    env_file: env/postgres.env
+    volumes:
+    - netbox-postgres-data:/var/lib/postgresql/data
+    networks:
+      - netbox
+
+  # redis
+  redis:
+    image: docker.io/redis:7-alpine
+    command:
+    - sh
+    - -c # this is to evaluate the $REDIS_PASSWORD from the env
+    - redis-server --appendonly yes --requirepass $$REDIS_PASSWORD ## $$ because of docker-compose
+    env_file: env/redis.env
+    volumes:
+    - netbox-redis-data:/data
+    networks:
+      - netbox
+  
+  redis-cache:
+    image: docker.io/redis:7-alpine
+    command:
+    - sh
+    - -c # this is to evaluate the $REDIS_PASSWORD from the env
+    - redis-server --requirepass $$REDIS_PASSWORD ## $$ because of docker-compose
+    env_file: env/redis-cache.env
+    volumes:
+    - netbox-redis-cache-data:/data
+    networks:
+      - netbox
+
+
+  # Image Traefik officielle: https://hub.docker.com/_/traefik
+  traefik:
+    image: traefik:2.11
+    command:
+      # decommenter pour acceder a la web UI traefik
+      #- --api.insecure=true
+      # dossier de configurations statique
+      - --providers.file.directory=/config
+      # indique d'ecouter docker
+      - --providers.docker
+      # points d'entree
+      - --entryPoints.web.address=:80
+      - --entryPoints.https.address=:443
+      - --entrypoints.https.http.tls=true
+    networks:
+      - netbox
+    ports:
+      # ports d'ecoute du proxy
+      - 443:443/tcp
+      # Web UI (utiliser avec --api.insecure=true)
+      #- 8080:8080/tcp
+    volumes:
+      # pour que trafic soit au courant des changements dans Docker
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./traefik:/config:ro
+    secrets:
+      - source: traefik.certificate
+        target: /certs/netbox.lab.lan-crt.pem
+      - source: traefik.key
+        target: /certs/netbox.lab.lan-key.pem
+
+volumes:
+  netbox-media-files:
+    driver: local
+  netbox-postgres-data:
+    driver: local
+  netbox-redis-cache-data:
+    driver: local
+  netbox-redis-data:
+    driver: local
+  netbox-reports-files:
+    driver: local
+  netbox-scripts-files:
+    driver: local

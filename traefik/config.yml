@@ -1,0 +1,4 @@
+tls:
+  certificates:
+    - certFile: /certs/netbox.iss.lan-crt.pem
+      keyFile: /certs/netbox.iss.lan-key.pem
